@@ -21,6 +21,13 @@ class Base(DeclarativeBase):
     pass
 
 
+def _utcnow() -> datetime.datetime:
+    # Small wrapper so every timestamp column below uses timezone-aware
+    # UTC time via one place, instead of the now-deprecated
+    # datetime.datetime.utcnow() spread across the file.
+    return datetime.datetime.now(datetime.UTC)
+
+
 class Project(Base):
     """A research project groups notes, papers, and hypotheses together."""
 
@@ -30,7 +37,7 @@ class Project(Base):
     name: Mapped[str] = mapped_column(String(255))
     description: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime, default=datetime.datetime.utcnow
+        DateTime, default=_utcnow
     )
 
     notes: Mapped[list["ResearchNote"]] = relationship(back_populates="project")
@@ -64,7 +71,7 @@ class ResearchNote(Base):
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"))
     text: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime, default=datetime.datetime.utcnow
+        DateTime, default=_utcnow
     )
 
     project: Mapped["Project"] = relationship(back_populates="notes")
@@ -80,7 +87,54 @@ class Hypothesis(Base):
     text: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(50), default="proposed")  # proposed/tested/rejected
     created_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime, default=datetime.datetime.utcnow
+        DateTime, default=_utcnow
     )
 
     project: Mapped["Project"] = relationship(back_populates="hypotheses")
+    experiments: Mapped[list["Experiment"]] = relationship(back_populates="hypothesis")
+
+
+class Experiment(Base):
+    """
+    A single experiment run to test a hypothesis. The schema itself (not
+    just its data) is deliberately laid out per the Phase 0 spec: every
+    field needed to reproduce the run later, even though no code actually
+    executes experiments yet — that lands in Milestone 6 (the Docker
+    sandbox). Having the table ready now means the sandbox work can focus
+    purely on execution, not on redesigning storage at the same time.
+    """
+
+    __tablename__ = "experiments"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    hypothesis_id: Mapped[int] = mapped_column(ForeignKey("hypotheses.id"))
+    question: Mapped[str] = mapped_column(Text)
+    methodology: Mapped[str] = mapped_column(Text, default="")
+    code_version: Mapped[str] = mapped_column(String(100), default="")  # e.g. a git commit hash
+    dataset_ref: Mapped[str] = mapped_column(String(255), default="")
+    config_json: Mapped[str] = mapped_column(Text, default="{}")
+    random_seed: Mapped[int] = mapped_column(default=42)
+    baseline_ref: Mapped[str] = mapped_column(String(255), default="")
+    status: Mapped[str] = mapped_column(String(50), default="planned")  # planned/running/done/failed
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime, default=_utcnow
+    )
+
+    hypothesis: Mapped["Hypothesis"] = relationship(back_populates="experiments")
+    metrics: Mapped[list["Metric"]] = relationship(back_populates="experiment")
+
+
+class Metric(Base):
+    """One measured value from an experiment (e.g. accuracy, loss, F1)."""
+
+    __tablename__ = "metrics"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    experiment_id: Mapped[int] = mapped_column(ForeignKey("experiments.id"))
+    name: Mapped[str] = mapped_column(String(100))
+    value: Mapped[float] = mapped_column()
+    # Nullable: most metrics won't have a confidence interval until the
+    # evaluation engine (Milestone 7) supports multi-run statistics.
+    confidence_interval: Mapped[str] = mapped_column(String(100), default="")
+
+    experiment: Mapped["Experiment"] = relationship(back_populates="metrics")
