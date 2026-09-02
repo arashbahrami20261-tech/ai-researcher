@@ -1,30 +1,20 @@
 """
 Tests for database/models.py.
 
-These use an in-memory SQLite database (`sqlite:///:memory:`) created
-fresh for each test, instead of the real `ai_researcher.db` file. That
-way running the test suite never touches — or accidentally wipes — your
-actual research data.
+These use an in-memory SQLite database created fresh for each test, instead
+of the real `ai_researcher.db` file, so running the suite never touches —
+or accidentally wipes — your actual research data.
 """
 
 from __future__ import annotations
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
-from database.models import Base, Project, ResearchNote, Hypothesis, Experiment, Metric
+from database.models import Critique, Experiment, Hypothesis, Metric, Project, ResearchNote
 
-
-@pytest.fixture
-def session():
-    """A fresh in-memory database, torn down automatically after each test."""
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    SessionLocal = sessionmaker(bind=engine)
-    s = SessionLocal()
-    yield s
-    s.close()
+# The `session` fixture (a fresh in-memory database per test) now lives in
+# tests/conftest.py so every test module shares one definition instead of
+# each copying its own.
 
 
 def test_create_project(session):
@@ -85,3 +75,20 @@ def test_experiment_links_to_hypothesis_and_metrics(session):
     assert hypothesis.experiments[0].question == "does X improve Y?"
     assert experiment.metrics[0].value == pytest.approx(0.87)
     assert experiment.status == "planned"  # default value
+
+
+def test_critique_records_a_verdict(session):
+    critique = Critique(
+        target_type="hypothesis",
+        target_id=1,
+        verdict="rejected",
+        checklist_json='{"is_hypothesis_testable": false}',
+        reasoning="not falsifiable as written",
+    )
+    session.add(critique)
+    session.commit()
+
+    fetched = session.query(Critique).one()
+    assert fetched.verdict == "rejected"
+    assert fetched.target_type == "hypothesis"
+    assert fetched.created_at is not None

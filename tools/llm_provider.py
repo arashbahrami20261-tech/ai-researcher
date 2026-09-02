@@ -11,6 +11,7 @@ touching the research logic itself — only this file changes.
 
 from __future__ import annotations
 
+import json
 import os
 from abc import ABC, abstractmethod
 
@@ -41,6 +42,69 @@ class LLMProvider(ABC):
         prompt). `max_tokens` caps the length of the response.
         """
         raise NotImplementedError
+
+    def generate_structured(
+        self, prompt: str, system: str | None = None, max_tokens: int = 1000
+    ) -> dict:
+        """
+        Same as `generate`, but the model is asked for JSON and the reply is
+        parsed into a Python dict.
+
+        Why this exists: splitting a free-text reply on labels like
+        "HYPOTHESIS" is fragile — it breaks the moment the model writes
+        "## Hypothesis" or reorders the sections. Asking for JSON and
+        parsing it gives a stable contract between the model and the code.
+
+        Implemented once here on the base class rather than per-provider,
+        since the JSON instruction and the parsing are provider-independent.
+
+        Raises `ValueError` if the reply cannot be parsed as JSON. Callers
+        must handle that rather than assume success — a malformed reply is
+        a real failure mode, not an edge case.
+        """
+        json_instruction = (
+            "Respond with a single valid JSON object and nothing else. "
+            "No explanation before or after it, no markdown code fences."
+        )
+        full_system = f"{system}\n\n{json_instruction}" if system else json_instruction
+
+        raw = self.generate(prompt, system=full_system, max_tokens=max_tokens)
+        return _parse_json_reply(raw)
+
+
+def _parse_json_reply(raw: str) -> dict:
+    """
+    Turn a model's text reply into a dict, tolerating the two things models
+    do anyway despite being told not to: wrapping the JSON in ```json fences,
+    and adding a sentence before or after it.
+    """
+    text = raw.strip()
+
+    # Strip markdown code fences if present.
+    if text.startswith("```"):
+        text = text.split("\n", 1)[-1]  # drop the opening ``` line
+        if text.rstrip().endswith("```"):
+            text = text.rstrip()[: -3]
+
+    # Fall back to grabbing the outermost {...} span, in case the model added
+    # a stray sentence around the object.
+    text = text.strip()
+    if not text.startswith("{"):
+        start = text.find("{")
+        end = text.rfind("}")
+        if start == -1 or end == -1 or end < start:
+            raise ValueError(f"No JSON object found in model reply: {raw[:200]!r}")
+        text = text[start : end + 1]
+
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Model reply was not valid JSON: {raw[:200]!r}") from exc
+
+    if not isinstance(parsed, dict):
+        raise ValueError(f"Expected a JSON object, got {type(parsed).__name__}")
+
+    return parsed
 
 
 class ClaudeProvider(LLMProvider):

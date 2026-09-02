@@ -124,6 +124,35 @@ class Experiment(Base):
     metrics: Mapped[list["Metric"]] = relationship(back_populates="experiment")
 
 
+class Critique(Base):
+    """
+    The Critic agent's review of a research output (Milestone 5).
+
+    Stored rather than printed-and-forgotten for two reasons the spec calls
+    for: the critic must be *able to reject* a result, so the verdict has to
+    outlive the run that produced it; and rejected results are themselves
+    valuable memory ("we already tried this and it didn't hold up").
+
+    `target_type` / `target_id` form a loose polymorphic link so one critic
+    can review a note, a hypothesis, or later an experiment, without needing
+    a separate table per reviewable thing.
+    """
+
+    __tablename__ = "critiques"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    target_type: Mapped[str] = mapped_column(String(50))  # note/hypothesis/experiment
+    target_id: Mapped[int] = mapped_column()
+    verdict: Mapped[str] = mapped_column(String(50))  # accepted/revise/rejected
+    # Free-text reasoning plus the structured checklist answers, kept as JSON
+    # so new checklist questions can be added without a schema migration.
+    checklist_json: Mapped[str] = mapped_column(Text, default="{}")
+    reasoning: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime, default=_utcnow
+    )
+
+
 class Metric(Base):
     """One measured value from an experiment (e.g. accuracy, loss, F1)."""
 
