@@ -182,7 +182,25 @@ class OllamaProvider(LLMProvider):
         if system:
             payload["system"] = system
 
-        response = requests.post(self._url, json=payload, timeout=self._timeout)
+        try:
+            response = requests.post(self._url, json=payload, timeout=self._timeout)
+        except requests.ConnectionError:
+            # Ollama not running is the single most common failure here, and
+            # the raw requests traceback buries that in 60 lines of urllib3
+            # internals. Say what is wrong and how to fix it.
+            raise RuntimeError(
+                f"Cannot reach Ollama at {self._url}. "
+                "Start it with:  ollama serve"
+            ) from None
+
+        if response.status_code == 404:
+            # Ollama returns 404 for a model it does not have, so the
+            # message should name the model rather than the URL.
+            raise RuntimeError(
+                f"Ollama has no model named {self._model!r}. "
+                f"Pull it with:  ollama pull {self._model}"
+            )
+
         response.raise_for_status()
         data = response.json()
 
