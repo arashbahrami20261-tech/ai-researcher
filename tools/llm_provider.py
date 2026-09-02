@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import json
 import os
+
+import requests
 from abc import ABC, abstractmethod
 
 from dotenv import load_dotenv
@@ -143,3 +145,51 @@ class ClaudeProvider(LLMProvider):
         return "".join(
             block.text for block in response.content if block.type == "text"
         )
+class OllamaProvider(LLMProvider):
+    """
+    LLMProvider backed by a local Ollama server.
+
+    Exists so the whole research loop can be exercised end-to-end without
+    a paid API key. Everything above this class is untouched: that is the
+    point of the LLMProvider interface.
+    """
+
+    def __init__(
+        self,
+        model: str = "qwen2.5:7b",
+        host: str = "http://localhost:11434",
+        timeout: int = 300,
+    ) -> None:
+        self._model = model
+        self._url = f"{host}/api/generate"
+        self._timeout = timeout
+
+    def generate(self, prompt: str, system: str | None = None, max_tokens: int = 1000) -> str:
+        """
+        Send one prompt to the local Ollama server and return its reply.
+
+        Ollama's request shape differs from Anthropic's: the token cap lives
+        under an "options" sub-object and is called num_predict, not
+        max_tokens. Translating that here is exactly why this abstraction
+        exists — nothing outside this class needs to know the difference.
+        """
+        payload = {
+            "model": self._model,
+            "prompt": prompt,
+            "stream": False,
+            "options": {"num_predict": max_tokens},
+        }
+        if system:
+            payload["system"] = system
+
+        response = requests.post(self._url, json=payload, timeout=self._timeout)
+        response.raise_for_status()
+        data = response.json()
+
+        # Ollama reports a missing model with HTTP 200 and an "error" key in
+        # the body, so raise_for_status() alone would let it through and the
+        # failure would surface much later as unparseable JSON.
+        if "error" in data:
+            raise RuntimeError(f"Ollama returned an error: {data['error']}")
+
+        return data.get("response", "")

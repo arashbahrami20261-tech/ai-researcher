@@ -54,7 +54,14 @@ def _mock_response():
     return mock_resp
 
 
+# Minimal valid Atom feed with no entries. Used by tests that care
+# about the outgoing request rather than the parsed reply.
+EMPTY_FEED = '<feed xmlns="http://www.w3.org/2005/Atom"></feed>'
+
+
 @patch("literature.arxiv_search.requests.get")
+
+
 def test_search_papers_parses_results(mock_get):
     mock_get.return_value = _mock_response()
 
@@ -109,3 +116,46 @@ def test_search_papers_live_network_call():
     papers = search_papers("transformer", max_results=3)
     assert len(papers) > 0
     assert papers[0].url.startswith("http")
+
+
+def test_relevance_ranking_is_the_default():
+    """
+    Regression test for a real failure, not a hypothetical one.
+
+    search_papers once defaulted to sort_by_newest=True. Every caller
+    inherited that without choosing it, and the first live run of the
+    research loop returned superconductor and vascular-imaging papers for
+    a question about transformers: arXiv receives hundreds of papers a
+    day, so date-sorting surfaces whatever was posted this morning that
+    merely matched the words.
+
+    This asserts on the outgoing request, which is the gap the rest of the
+    suite had — those tests mock arXiv's reply and so only ever checked
+    that we parse a response correctly, never that we ask a sensible
+    question in the first place.
+    """
+    with patch("literature.arxiv_search.requests.get") as mock_get:
+        mock_get.return_value.text = EMPTY_FEED
+        mock_get.return_value.raise_for_status = lambda: None
+
+        search_papers("transformers long context")
+
+    params = mock_get.call_args.kwargs["params"]
+    assert "sortBy" not in params, (
+        "No sortBy means arXiv's own relevance ranking, which is what a "
+        "research question needs."
+    )
+
+
+def test_newest_first_is_still_available_when_asked_for():
+    # The parameter is not the bug — the default was. Recency is a
+    # legitimate thing to want, so it must stay reachable.
+    with patch("literature.arxiv_search.requests.get") as mock_get:
+        mock_get.return_value.text = EMPTY_FEED
+        mock_get.return_value.raise_for_status = lambda: None
+
+        search_papers("transformers", sort_by_newest=True)
+
+    params = mock_get.call_args.kwargs["params"]
+    assert params["sortBy"] == "submittedDate"
+    assert params["sortOrder"] == "descending"

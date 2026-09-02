@@ -20,10 +20,26 @@ import requests
 
 from database.db import SessionLocal, ensure_migrated
 from research.loop import format_report, run_research
-from tools.llm_provider import ClaudeProvider
+from tools.llm_provider import ClaudeProvider, OllamaProvider
 
 
-def main(question: str) -> int:
+def build_provider(name: str):
+    """
+    Pick an LLM backend by name.
+
+    Kept as a tiny factory rather than an if-statement inline, so adding
+    a third provider later touches one place. Note what is NOT here:
+    nothing about research, critics, or prompts. The caller receives an
+    LLMProvider and does not care which one.
+    """
+    if name == "ollama":
+        return OllamaProvider()
+    if name == "claude":
+        return ClaudeProvider()
+    raise ValueError(f"Unknown provider: {name!r}. Use 'claude' or 'ollama'.")
+
+
+def main(question: str, provider: str = "claude") -> int:
     """Returns a process exit code: 0 on success, non-zero on failure."""
     try:
         ensure_migrated()
@@ -32,7 +48,7 @@ def main(question: str) -> int:
         return 1
 
     try:
-        llm = ClaudeProvider()
+        llm = build_provider(provider)
     except RuntimeError as exc:
         # Missing API key — the most common first-run failure.
         print(f"LLM setup failed: {exc}", file=sys.stderr)
@@ -66,7 +82,21 @@ def main(question: str) -> int:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print('Usage: python scripts/run_research.py "your research question"')
+    args = sys.argv[1:]
+
+    # Minimal flag parsing rather than argparse: one optional flag does not
+    # justify the extra dependency on argparse's output formatting here.
+    chosen = "claude"
+    if "--provider" in args:
+        i = args.index("--provider")
+        if i + 1 >= len(args):
+            print("--provider needs a value: claude or ollama")
+            sys.exit(1)
+        chosen = args[i + 1]
+        args = args[:i] + args[i + 2:]
+
+    if not args:
+        print('Usage: python scripts/run_research.py [--provider claude|ollama] "your question"')
         sys.exit(1)
-    sys.exit(main(" ".join(sys.argv[1:])))
+
+    sys.exit(main(" ".join(args), provider=chosen))

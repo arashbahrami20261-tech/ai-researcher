@@ -17,6 +17,15 @@ import requests
 
 ARXIV_API_URL = "http://export.arxiv.org/api/query"
 
+# arXiv spans physics, maths, biology and more, so an unrestricted
+# "all:" query on a question about long context returned papers on long
+# paths in hypercube subgraphs — the word matched, the field did not.
+# This project researches AI only, so restrict to the relevant categories:
+# artificial intelligence, machine learning, computation and language,
+# computer vision, and neural computing.
+_AI_CATEGORIES = ["cs.AI", "cs.LG", "cs.CL", "cs.CV", "cs.NE"]
+_CATEGORY_FILTER = " OR ".join(f"cat:{c}" for c in _AI_CATEGORIES)
+
 # arXiv's Atom feed uses these XML namespaces; declaring them once here
 # keeps the parsing code below readable instead of repeating full URLs.
 _NAMESPACES = {
@@ -42,7 +51,7 @@ class Paper:
 def search_papers(
     query: str,
     max_results: int = 10,
-    sort_by_newest: bool = True,
+    sort_by_newest: bool = False,
     min_year: int | None = None,
 ) -> list[Paper]:
     """
@@ -69,10 +78,17 @@ def search_papers(
     fetch_count = min(max_results * 3, 50) if min_year else max_results
 
     params = {
-        "search_query": f"all:{query}",
+        "search_query": f"({_CATEGORY_FILTER}) AND all:{query}",
         "start": 0,
         "max_results": fetch_count,
     }
+    # Default is arXiv's relevance ranking. Sorting by date instead sounds
+    # like "prefer newer research", but arXiv receives hundreds of papers a
+    # day, so date-sorting returns whatever was posted this morning that
+    # merely matched the words — the first live run of the research loop
+    # came back with superconductors and vascular imaging for a question
+    # about transformers. Callers who genuinely want recency must now ask
+    # for it explicitly.
     if sort_by_newest:
         params["sortBy"] = "submittedDate"
         params["sortOrder"] = "descending"
