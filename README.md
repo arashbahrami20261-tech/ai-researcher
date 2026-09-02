@@ -3,8 +3,9 @@
 An autonomous AI research agent, built incrementally in milestones.
 
 Current state: **question → arXiv search → summary + hypothesis → critic
-review → saved to database → markdown report.** Verified end-to-end against
-a local model.
+review → saved to database → markdown report.** Separately, the coding agent
+writes Python and executes it inside a locked-down Docker container. Both
+paths verified end-to-end against a local model.
 
 See `docs/phase0-architecture.md` for the full architecture and roadmap.
 
@@ -40,8 +41,8 @@ python scripts/run_research.py --provider ollama "How do transformers handle lon
 ## Tests
 
 ```bash
-pytest              # 33 tests, no network, no API key needed
-pytest -m live      # additionally hits the real arXiv API
+pytest              # 48 tests, no network, no API key needed
+pytest -m live      # 7 more: real arXiv calls + real Docker containers
 ```
 
 Every test injects a fake LLM provider, so the suite never spends money
@@ -57,7 +58,7 @@ and never depends on a network connection.
 | 3 | Persistent memory (SQLite + migrations) | done |
 | 4 | Basic research loop | done |
 | 5 | Critic agent | done |
-| 6 | Coding agent + Docker sandbox | not started |
+| 6 | Coding agent + Docker sandbox | done |
 | 7 | Experiment tracking + evaluation engine | not started |
 | 8 | Hypothesis generation from results | not started |
 | 9 | Knowledge graph | not started |
@@ -71,6 +72,9 @@ and never depends on a network connection.
   allow. `ClaudeProvider`'s default model string may also be stale.
 - A local 7B model is much weaker than a frontier model. It produces usable
   summaries and hypotheses, but expect vaguer reasoning.
+- The coding agent and the research loop are not yet wired together. The
+  sandbox runs code on request; nothing generates experiments from a
+  hypothesis yet. That is Milestone 7.
 - The critic reviews hypotheses only. The experiment-stage checklist (data
   leakage, sample size, statistical significance, baseline choice) is
   defined in `agents/critic.py` but deliberately unused until Milestone 7,
@@ -105,22 +109,36 @@ for hypotheses not grounded in the retrieved papers, and passed that check
 on the third while still returning REVISE — the hypothesis named two
 mechanisms to combine without specifying how, which is not yet testable.
 
+## Sandbox
+
+Generated code is untrusted, so it runs in a container with: no network,
+512m memory (swap pinned to match), 0.5 CPU, a 64-process limit, read-only
+root filesystem, non-root user, all Linux capabilities dropped, and
+no-new-privileges. The code directory is mounted read-only.
+
+These are not assumed to work. `tests/test_sandbox.py` launches real
+containers and asserts that network calls fail, the host filesystem is
+invisible, writes outside /tmp are refused, and infinite loops get killed.
+A security control nobody has watched fail is not a control.
+
+Requires Docker, runnable without sudo.
+
 ## Project layout
 
 ```
-agents/           critic.py — the Critic agent (Milestone 5)
+agents/           critic.py (Milestone 5), coder.py (Milestone 6)
 research/         loop.py — the research loop orchestration
 literature/       arxiv_search.py — literature backend
 tools/            llm_provider.py — LLM abstraction (Claude + Ollama)
 database/         models.py, db.py — SQLAlchemy schema + engine
 migrations/       Alembic migration history
-tests/            conftest.py (FakeLLM) + 33 tests
+tests/            conftest.py (FakeLLM) + 55 tests
 scripts/          run_research.py — thin CLI entrypoint
 docs/             phase0-architecture.md
 memory/           (empty — reserved for the knowledge graph, Milestone 9)
-experiments/      (empty — Milestone 6+)
+experiments/      (empty — Milestone 7)
 evaluation/       (empty — Milestone 7+)
-security/         (empty — sandbox config, Milestone 6)
+security/         sandbox.py — Docker isolation for generated code
 models/           (empty — Pydantic schemas, added as needed)
 configs/          (empty)
 ```
