@@ -2,10 +2,14 @@
 
 An autonomous AI research agent, built incrementally in milestones.
 
-Current state: **question → arXiv search → summary + hypothesis → critic
-review → saved to database → markdown report.** Separately, the coding agent
-writes Python and executes it inside a locked-down Docker container. Both
-paths verified end-to-end against a local model.
+Current state: the system runs a **closed research loop** — a hypothesis
+becomes generated Python, executed in a locked-down Docker container,
+measured against a baseline, checked for consistency against earlier
+results in the same chain, and turned into the next hypothesis. A
+separate literature path handles arXiv search and paper summaries.
+
+Verified end-to-end against a local model: a 3-cycle run scaled from
+50,000 to 200,000 elements, each step chosen by the system.
 
 See `docs/phase0-architecture.md` for the full architecture and roadmap.
 
@@ -41,7 +45,7 @@ python scripts/run_research.py --provider ollama "How do transformers handle lon
 ## Tests
 
 ```bash
-pytest              # 88 tests, no network, no API key needed
+pytest              # 112 tests, no network, no API key needed
 pytest -m live      # 7 more: real arXiv calls + real Docker containers
 ```
 
@@ -61,7 +65,7 @@ and never depends on a network connection.
 | 6 | Coding agent + Docker sandbox | done |
 | 7 | Experiment tracking + evaluation engine | done |
 | 8 | Hypothesis generation from results (closed loop) | done |
-| 9 | Knowledge graph | not started |
+| 9 | Knowledge graph + trend checks | done |
 | 10 | Multi-agent orchestration, benchmarking, self-improvement | not started |
 
 ## Known limitations
@@ -72,12 +76,14 @@ and never depends on a network connection.
   allow. `ClaudeProvider`'s default model string may also be stale.
 - A local 7B model is much weaker than a frontier model. It produces usable
   summaries and hypotheses, but expect vaguer reasoning.
-- The result critic reviews each experiment in isolation. Across a live
-  3-cycle run it passed all three, and did not notice that the binary
-  search timings contradict each other: 0.00068s at 50k elements,
-  0.00136s at 200k, then 0.00055s at 400k. Binary search does not get
-  faster on a bigger list — those numbers are measurement noise. Spotting
-  that needs experiment history, which is Milestone 9.
+- The trend check uses cycle number as a proxy for input size, because
+  input size is not recorded per experiment. It can tell that a value
+  fell when it should have risen, but not whether it rose by the right
+  amount when the input doubled. That is the weaker half of the check.
+- The model critic's judgement of consistency is not reliable at 7B.
+  Asked twice about the same three numbers it gave opposite answers, so
+  the numeric check carries that job and the model critic is kept for
+  reading code.
 - The literature loop (research/loop.py) and the experiment loop
   (research/cycle.py) are still separate entry points. A hypothesis from
   a paper search does not yet flow into an experiment.
@@ -161,6 +167,24 @@ treated every doubt as fatal and the loop never reached a second cycle.
 
 `max_cycles` is required. Nothing here decides on its own to keep going.
 
+## Knowledge graph and trend checks
+
+Each cycle records two edges: what it `tests`, and what it `follows`.
+Walking the `follows` edges backwards gives the result critic the earlier
+results in the same chain — something the isolated review never had.
+
+Alongside it, `evaluation/trends.py` compares the numbers directly. That
+part is deliberately not a prompt. Asked twice whether the same three
+timings were consistent, a 7B local model answered "not consistent" once
+and "generally consistent" the next time. Comparing numbers is
+arithmetic, not judgement, and arithmetic should give the same answer
+every time.
+
+Two constants here were wrong on the first attempt and are documented
+where they live: metric names drifted between cycles until they were
+enforced in code, and the tolerance was set to 0.5 without looking at
+data, which made it miss a real 46.8% drop by three percentage points.
+
 ## Project layout
 
 ```
@@ -170,12 +194,12 @@ literature/       arxiv_search.py — literature backend
 tools/            llm_provider.py — LLM abstraction (Claude + Ollama)
 database/         models.py, db.py — SQLAlchemy schema + engine
 migrations/       Alembic migration history
-tests/            conftest.py (FakeLLM) + 95 tests
+tests/            conftest.py (FakeLLM) + 119 tests
 scripts/          run_research.py — thin CLI entrypoint
 docs/             phase0-architecture.md
-memory/           (empty — reserved for the knowledge graph, Milestone 9)
+knowledge_graph/  store.py — edges between experiments and hypotheses
 experiments/      runner.py — runs and records one experiment
-evaluation/       compare.py — baseline comparison, refuses weak claims
+evaluation/       compare.py (baselines), trends.py (chain consistency)
 security/         sandbox.py — Docker isolation for generated code
 models/           (empty — Pydantic schemas, added as needed)
 configs/          (empty)
