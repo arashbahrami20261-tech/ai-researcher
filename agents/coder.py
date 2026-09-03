@@ -80,6 +80,7 @@ def write_and_run(
     task: str,
     max_attempts: int = MAX_ATTEMPTS,
     timeout_seconds: int = 30,
+    output_check=None,
 ) -> CodingOutcome:
     """
     Ask the model for code that accomplishes `task`, run it sandboxed, and
@@ -102,14 +103,23 @@ def write_and_run(
         outcome.code = code
         outcome.result = result
 
-        if result.succeeded:
+        # A script can exit 0 and still be useless. The runner needs
+        # METRIC lines; without this check a run that printed the right
+        # numbers in the wrong format counted as success and burned a
+        # whole research cycle. Exit code alone is too weak a definition
+        # of "worked".
+        output_problem = ""
+        if result.succeeded and output_check is not None:
+            output_problem = output_check(result.stdout) or ""
+
+        if result.succeeded and not output_problem:
             return outcome
 
         if attempt < max_attempts - 1:
             # Feed the real failure back. stderr is truncated because a
             # long traceback wastes context without adding information —
             # the last lines are the ones that matter.
-            error = (result.stderr or "timed out").strip()[-1500:]
+            error = (output_problem or result.stderr or "timed out").strip()[-1500:]
             prompt = (
                 f"This Python script failed:\n\n{code}\n\n"
                 f"The error was:\n\n{error}\n\n"

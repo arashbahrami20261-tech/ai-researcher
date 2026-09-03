@@ -127,3 +127,19 @@ def test_the_prompt_shows_a_worked_metric_example(session):
 
     task = war.call_args[0][1]
     assert "METRIC accuracy=0.87" in task
+
+
+def test_the_runner_asks_the_coder_to_retry_when_no_metrics_appear(session):
+    """
+    The runner supplies an output check rather than inspecting stdout
+    afterwards: by the time the runner sees the output, the attempt is
+    already spent and the model has no chance to fix it.
+    """
+    llm = FakeLLM(["irrelevant"])
+
+    with patch("experiments.runner.write_and_run", return_value=_outcome("METRIC a=1")) as war:
+        run_experiment(llm, session, 1, "q", "m")
+
+    check = war.call_args.kwargs["output_check"]
+    assert check("METRIC a=1") == ""
+    assert "METRIC" in check("nothing measured here")

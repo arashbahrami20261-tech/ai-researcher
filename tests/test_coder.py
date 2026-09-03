@@ -106,3 +106,53 @@ def test_markdown_fences_are_stripped():
 
 def test_bare_code_is_left_alone():
     assert _extract_code("print(3)") == "print(3)"
+
+
+def test_output_check_can_reject_a_run_that_exited_zero():
+    """
+    A script can exit 0 and still be useless.
+
+    This was a real failure: the model printed the right numbers in the
+    wrong format, the sandbox reported success, and a whole research
+    cycle was spent on a run that measured nothing. Exit code alone is
+    too weak a definition of "worked".
+    """
+    llm = FakeLLM(["bad format", "good format"])
+    calls = []
+
+    def check(stdout):
+        calls.append(stdout)
+        return "" if stdout == "METRIC a=1" else "no METRIC lines found"
+
+    with patch("agents.coder.run_code", side_effect=[_ok("wrong"), _ok("METRIC a=1")]):
+        outcome = write_and_run(llm, "measure something", output_check=check)
+
+    assert outcome.succeeded
+    assert len(outcome.attempts) == 2
+    assert len(calls) == 2
+
+
+def test_the_output_problem_is_explained_to_the_model():
+    # Telling the model "try again" without saying what was wrong wastes
+    # the retry. The check's message must reach the next prompt.
+    llm = FakeLLM(["bad", "good"])
+
+    def check(stdout):
+        return "" if "METRIC" in stdout else "UNIQUE_FORMAT_COMPLAINT"
+
+    with patch("agents.coder.run_code", side_effect=[_ok("wrong"), _ok("METRIC a=1")]):
+        write_and_run(llm, "task", output_check=check)
+
+    assert "UNIQUE_FORMAT_COMPLAINT" in llm.calls[1]["prompt"]
+
+
+def test_no_output_check_means_exit_code_alone_decides():
+    # Existing callers that do not care about output format must keep
+    # working unchanged.
+    llm = FakeLLM(["anything"])
+
+    with patch("agents.coder.run_code", return_value=_ok("whatever")):
+        outcome = write_and_run(llm, "task")
+
+    assert outcome.succeeded
+    assert len(outcome.attempts) == 1

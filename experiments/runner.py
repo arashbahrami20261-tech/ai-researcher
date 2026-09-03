@@ -121,7 +121,25 @@ def run_experiment(
         "Use only the Python standard library."
     )
 
-    outcome = write_and_run(llm, task, timeout_seconds=timeout_seconds)
+    def _needs_metrics(stdout: str) -> str:
+        """
+        Reject a run that measured nothing, so the coding agent retries.
+
+        Passed to write_and_run rather than checked afterwards: by the
+        time the runner sees the output, the attempt is spent. The model
+        needs to be told while it still has retries left.
+        """
+        if parse_metrics(stdout):
+            return ""
+        return (
+            "The script ran without error but printed no METRIC lines, so "
+            "nothing was measured. Every value must be printed on its own "
+            "line as: METRIC name=value"
+        )
+
+    outcome = write_and_run(
+        llm, task, timeout_seconds=timeout_seconds, output_check=_needs_metrics
+    )
 
     experiment.code = outcome.code
     experiment.stdout = outcome.result.stdout if outcome.result else ""
