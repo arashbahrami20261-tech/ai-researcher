@@ -102,3 +102,21 @@ def test_the_prompt_demands_distinct_scores():
     llm = FakeLLM([{"proposals": [_entry("a")]}])
     generate_followups(llm, "q", "h", "m", {"acc": 0.9})
     assert "NOT be identical" in llm.calls[0]["prompt"]
+
+
+def test_the_next_cycle_is_told_to_keep_the_metric_names():
+    """
+    Metric names must survive into the follow-up.
+
+    On a live run the model renamed linear_seconds to linear_search_time
+    between cycles. Each series then held a single point, and the trend
+    check went silent — a series of one cannot contradict anything. The
+    check was not broken; it was starved.
+    """
+    llm = FakeLLM([{"proposals": [_entry("a")]}])
+
+    generate_followups(llm, "q", "h", "m", {"linear_seconds": 1.8, "binary_seconds": 0.001})
+
+    prompt = llm.calls[0]["prompt"]
+    assert "linear_seconds" in prompt
+    assert "Do not rename" in prompt

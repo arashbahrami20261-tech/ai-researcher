@@ -76,6 +76,7 @@ def run_experiment(
     higher_is_better: bool = True,
     seed: int | None = None,
     timeout_seconds: int = 60,
+    required_metrics: list[str] | None = None,
 ) -> ExperimentOutcome:
     """
     Design, run, record, and evaluate one experiment.
@@ -118,7 +119,12 @@ def run_experiment(
         "on its own line, starting with the literal word METRIC.\n\n"
         "Correct   -> METRIC accuracy=0.87\n"
         "Incorrect -> accuracy=0.87        (this will not be counted)\n\n"
-        "Use only the Python standard library."
+        + (
+            f"Use exactly these metric names: {', '.join(required_metrics)}.\n"
+            if required_metrics
+            else ""
+        )
+        + "Use only the Python standard library."
     )
 
     def _needs_metrics(stdout: str) -> str:
@@ -129,13 +135,28 @@ def run_experiment(
         time the runner sees the output, the attempt is spent. The model
         needs to be told while it still has retries left.
         """
-        if parse_metrics(stdout):
-            return ""
-        return (
-            "The script ran without error but printed no METRIC lines, so "
-            "nothing was measured. Every value must be printed on its own "
-            "line as: METRIC name=value"
-        )
+        found = parse_metrics(stdout)
+        if not found:
+            return (
+                "The script ran without error but printed no METRIC lines, "
+                "so nothing was measured. Every value must be printed on "
+                "its own line as: METRIC name=value"
+            )
+
+        # Names must match across a chain or each series holds one point
+        # and the trend check has nothing to compare. Telling the model in
+        # the prompt was not enough: it kept the names in one cycle and
+        # renamed them in the next.
+        if required_metrics:
+            missing = [name for name in required_metrics if name not in found]
+            if missing:
+                return (
+                    f"The script printed {sorted(found)} but these exact "
+                    f"metric names are required: {missing}. Use these names "
+                    f"exactly; results cannot be compared across experiments "
+                    f"if the names change."
+                )
+        return ""
 
     outcome = write_and_run(
         llm, task, timeout_seconds=timeout_seconds, output_check=_needs_metrics

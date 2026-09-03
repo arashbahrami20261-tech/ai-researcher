@@ -30,6 +30,8 @@ from agents.hypothesis import Proposal, generate_followups
 from agents.result_critic import VERDICT_INVALID, ResultCritique, review_result
 from database.models import Experiment, Hypothesis
 from evaluation.compare import format_comparison
+from evaluation.trends import TrendIssue, check_monotonic
+from knowledge_graph.store import link_experiment_chain, prior_results_in_chain
 from experiments.runner import ExperimentOutcome, run_experiment
 from tools.llm_provider import LLMProvider
 
@@ -44,6 +46,7 @@ class Cycle:
     outcome: ExperimentOutcome
     critique: ResultCritique | None = None
     proposals: list[Proposal] = field(default_factory=list)
+    trend_issues: list[TrendIssue] = field(default_factory=list)
     stopped_because: str = ""
 
 
@@ -88,6 +91,17 @@ def run_cycles(
     """
     cycles: list[Cycle] = []
     hypothesis_ids: list[int] = []
+    previous_experiment_id: int | None = None
+    # (cycle number, metrics) per successful cycle, used for the numeric
+    # trend check. Cycle number stands in for input size: the loop scales
+    # up as it goes, so position in the chain is a usable proxy.
+    metric_history: list[tuple[int, dict[str, float]]] = []
+    # Names are fixed by the first cycle that measures anything, and every
+    # cycle after it must use the same ones. Asking the model nicely was
+    # not enough: it kept the names in cycle 2 and renamed them in cycle 3,
+    # which left each series holding a single point and silently disabled
+    # the trend check.
+    required_metrics: list[str] | None = None
     current_hypothesis = hypothesis
     current_methodology = methodology
 
@@ -107,14 +121,42 @@ def run_cycles(
             baseline_value=baseline_value,
             higher_is_better=higher_is_better,
             timeout_seconds=timeout_seconds,
+            required_metrics=required_metrics,
         )
 
         cycle = Cycle(n, current_hypothesis, current_methodology, outcome)
+
+        # Record the edges as research happens rather than reconstructing
+        # the chain later from timestamps.
+        link_experiment_chain(
+            session, outcome.experiment_id, previous_experiment_id, row.id
+        )
+        previous_experiment_id = outcome.experiment_id
 
         if not outcome.succeeded:
             cycle.stopped_because = f"Experiment produced no metrics: {outcome.error[:200]}"
             cycles.append(cycle)
             break
+
+        if required_metrics is None:
+            required_metrics = list(outcome.metrics)
+
+        metric_history.append((n, outcome.metrics))
+
+        # Deterministic check first. Comparing numbers across the chain is
+        # arithmetic, and the model gave contradictory answers to the same
+        # comparison on consecutive runs.
+        for name in outcome.metrics:
+            series = [
+                (float(pos), values[name])
+                for pos, values in metric_history
+                if name in values
+            ]
+            issue = check_monotonic(name, series, should_increase=True)
+            if issue is not None:
+                cycle.trend_issues.append(issue)
+
+        prior = [r.summary() for r in prior_results_in_chain(session, outcome.experiment_id)]
 
         try:
             cycle.critique = review_result(
@@ -123,6 +165,7 @@ def run_cycles(
                 code=session.query(Experiment).get(outcome.experiment_id).code,
                 stdout=outcome.stdout,
                 metrics=outcome.metrics,
+                prior_results=prior,
             )
         except ValueError as exc:
             # An unreviewable result is not a reviewed one. Stop rather
@@ -193,6 +236,11 @@ def format_cycles(cycles: list[Cycle]) -> str:
 
         if c.outcome.comparison:
             lines += [f"**Evaluation:** {format_comparison(c.outcome.comparison)}", ""]
+
+        if c.trend_issues:
+            lines.append("**Trend check:** INCONSISTENT")
+            lines += [f"- {issue}" for issue in c.trend_issues]
+            lines.append("")
 
         if c.critique:
             lines.append(f"**Result review:** {c.critique.verdict.upper()}")

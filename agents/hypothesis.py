@@ -102,6 +102,17 @@ def generate_followups(
     and "the model's reply was broken" are different situations.
     """
     metric_lines = "\n".join(f"  {name} = {value}" for name, value in metrics.items())
+
+    # The metric names must survive into the next cycle. On a live run the
+    # model renamed linear_seconds to linear_search_time between cycles,
+    # which split each series into single points and silently disabled the
+    # trend check: a series of one cannot contradict anything.
+    names = ", ".join(metrics)
+    naming_rule = (
+        f"The follow-up MUST report the same metric names as this "
+        f"experiment: {names}. Do not rename them. Results cannot be "
+        f"compared across experiments if the names change.\n\n"
+    )
     criteria_spec = "\n".join(
         f'      "{c}": a number from 1 to 5,' for c in SELECTION_CRITERIA
     )
@@ -120,6 +131,7 @@ def generate_followups(
         f"Measured results:\n{metric_lines}\n\n"
         f"{comparison_summary}\n\n"
         f"{failures_block}"
+        f"{naming_rule}"
         f"Propose {count} follow-up experiments. Score them so they can "
         "be ranked against each other: the scores must NOT be identical "
         "across proposals. If two seem equally valuable, decide which one "

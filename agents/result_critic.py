@@ -35,6 +35,10 @@ CHECKLIST = [
     "no_obvious_measurement_bug",
     # Could something other than the stated cause produce this number?
     "no_alternative_explanation",
+    # Does this number sit consistently with earlier results in the same
+    # chain? Only meaningful when prior results are supplied; without
+    # them the critic has nothing to compare against and this is skipped.
+    "consistent_with_earlier_results",
 ]
 
 VERDICT_TRUSTWORTHY = "trustworthy"
@@ -84,6 +88,7 @@ def review_result(
     code: str,
     stdout: str,
     metrics: dict[str, float],
+    prior_results: list[str] | None = None,
 ) -> ResultCritique:
     """
     Review one experiment's output against the code that produced it.
@@ -100,11 +105,25 @@ def review_result(
     checklist_spec = "\n".join(f'  "{key}": true or false,' for key in CHECKLIST)
     metric_lines = "\n".join(f"  {name} = {value}" for name, value in metrics.items())
 
+    # Prior results from the same chain, if the caller supplied them.
+    # A live 3-cycle run passed all three reviews while the timings
+    # contradicted each other, because each review saw only its own
+    # numbers. A critic cannot catch an inconsistency it cannot see.
+    history_block = ""
+    if prior_results:
+        history_block = (
+            "Earlier results in this same chain of experiments, oldest "
+            "first:\n" + "\n".join(f"  {r}" for r in prior_results) + "\n\n"
+            "If the new number does not fit the trend of these, say so: "
+            "a measurement that reverses an established trend is more likely to be noise or a bug than a discovery.\n\n"
+        )
+
     prompt = (
         f"The experiment was asked to do this:\n{methodology}\n\n"
         f"The model wrote this code:\n{code}\n\n"
         f"It printed:\n{stdout}\n\n"
         f"Parsed metrics:\n{metric_lines}\n\n"
+        f"{history_block}"
         "Review these measurements. Return JSON with exactly this shape:\n"
         "{\n"
         f"{checklist_spec}\n"

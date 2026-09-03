@@ -174,3 +174,37 @@ class Metric(Base):
     confidence_interval: Mapped[str] = mapped_column(String(100), default="")
 
     experiment: Mapped["Experiment"] = relationship(back_populates="metrics")
+
+
+class GraphEdge(Base):
+    """
+    One directed relationship in the research knowledge graph.
+
+    A single edge table rather than a table per relationship type. New
+    relations get added throughout a project's life, and a schema that
+    needs a migration every time someone wants to record "reproduces" or
+    "supersedes" stops getting used.
+
+    `source_type` / `source_id` and `target_type` / `target_id` are loose
+    references rather than foreign keys, for the same reason: an edge
+    should be able to point at a paper, an experiment, or a concept
+    without the schema knowing about all of them in advance. The tradeoff
+    is that the database will not enforce that the targets exist, so the
+    store layer checks instead.
+    """
+
+    __tablename__ = "graph_edges"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source_type: Mapped[str] = mapped_column(String(50))
+    source_id: Mapped[int] = mapped_column()
+    relation: Mapped[str] = mapped_column(String(50))
+    target_type: Mapped[str] = mapped_column(String(50))
+    target_id: Mapped[int] = mapped_column()
+    # Free-text note on why this edge exists — e.g. which metric
+    # contradicts which. Without it a "contradicts" edge is an assertion
+    # with no evidence attached.
+    note: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime, default=_utcnow
+    )
