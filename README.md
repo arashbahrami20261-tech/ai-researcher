@@ -41,7 +41,7 @@ python scripts/run_research.py --provider ollama "How do transformers handle lon
 ## Tests
 
 ```bash
-pytest              # 48 tests, no network, no API key needed
+pytest              # 68 tests, no network, no API key needed
 pytest -m live      # 7 more: real arXiv calls + real Docker containers
 ```
 
@@ -59,7 +59,7 @@ and never depends on a network connection.
 | 4 | Basic research loop | done |
 | 5 | Critic agent | done |
 | 6 | Coding agent + Docker sandbox | done |
-| 7 | Experiment tracking + evaluation engine | not started |
+| 7 | Experiment tracking + evaluation engine | done |
 | 8 | Hypothesis generation from results | not started |
 | 9 | Knowledge graph | not started |
 | 10 | Multi-agent orchestration, benchmarking, self-improvement | not started |
@@ -72,9 +72,13 @@ and never depends on a network connection.
   allow. `ClaudeProvider`'s default model string may also be stale.
 - A local 7B model is much weaker than a frontier model. It produces usable
   summaries and hypotheses, but expect vaguer reasoning.
-- The coding agent and the research loop are not yet wired together. The
-  sandbox runs code on request; nothing generates experiments from a
-  hypothesis yet. That is Milestone 7.
+- The research loop and the experiment runner are still separate entry
+  points. Nothing yet turns a generated hypothesis into an experiment
+  automatically — that is Milestone 8.
+- Nothing checks whether a result is *meaningful*. A live run produced a
+  timing bug that reported 8463 seconds for a 13-second loop: the code
+  ran, the metric parsed, the number was nonsense. Catching that needs a
+  critic on results, not just on hypotheses.
 - The critic reviews hypotheses only. The experiment-stage checklist (data
   leakage, sample size, statistical significance, baseline choice) is
   defined in `agents/critic.py` but deliberately unused until Milestone 7,
@@ -123,6 +127,20 @@ A security control nobody has watched fail is not a control.
 
 Requires Docker, runnable without sudo.
 
+## Evaluation
+
+Every result is measured against an explicit baseline, and the engine
+refuses to call something an improvement when the evidence is thin. It
+returns INCONCLUSIVE for a single run, NO_DIFFERENCE for a change under
+1%, and INCONCLUSIVE again when the effect is smaller than the spread
+across runs.
+
+That refusal is the point. A live run had binary search beating its
+baseline by 94% and the engine still declined to call it an improvement,
+because one run is not evidence. Experiments store their seed, the exact
+code that ran, stdout, and any error — failed runs included, since a
+failure that leaves no trace teaches nothing.
+
 ## Project layout
 
 ```
@@ -132,12 +150,12 @@ literature/       arxiv_search.py — literature backend
 tools/            llm_provider.py — LLM abstraction (Claude + Ollama)
 database/         models.py, db.py — SQLAlchemy schema + engine
 migrations/       Alembic migration history
-tests/            conftest.py (FakeLLM) + 55 tests
+tests/            conftest.py (FakeLLM) + 75 tests
 scripts/          run_research.py — thin CLI entrypoint
 docs/             phase0-architecture.md
 memory/           (empty — reserved for the knowledge graph, Milestone 9)
-experiments/      (empty — Milestone 7)
-evaluation/       (empty — Milestone 7+)
+experiments/      runner.py — runs and records one experiment
+evaluation/       compare.py — baseline comparison, refuses weak claims
 security/         sandbox.py — Docker isolation for generated code
 models/           (empty — Pydantic schemas, added as needed)
 configs/          (empty)
