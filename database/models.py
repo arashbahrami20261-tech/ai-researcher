@@ -98,10 +98,8 @@ class Experiment(Base):
     """
     A single experiment run to test a hypothesis. The schema itself (not
     just its data) is deliberately laid out per the Phase 0 spec: every
-    field needed to reproduce the run later, even though no code actually
-    executes experiments yet — that lands in Milestone 6 (the Docker
-    sandbox). Having the table ready now means the sandbox work can focus
-    purely on execution, not on redesigning storage at the same time.
+    field needed to reproduce the run later, Execution happens in the Docker
+    sandbox (security/sandbox.py); this table is the record of it.
     """
 
     __tablename__ = "experiments"
@@ -116,6 +114,15 @@ class Experiment(Base):
     random_seed: Mapped[int] = mapped_column(default=42)
     baseline_ref: Mapped[str] = mapped_column(String(255), default="")
     status: Mapped[str] = mapped_column(String(50), default="planned")  # planned/running/done/failed
+
+    # What actually ran, and what came back. The fields above describe what
+    # was *intended*; these three record what *happened*. Without them,
+    # `code_version` is just a hash and a result six months from now cannot
+    # be traced back to the script that produced it.
+    code: Mapped[str] = mapped_column(Text, default="")
+    stdout: Mapped[str] = mapped_column(Text, default="")
+    error: Mapped[str] = mapped_column(Text, default="")
+
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime, default=_utcnow
     )
