@@ -41,7 +41,7 @@ python scripts/run_research.py --provider ollama "How do transformers handle lon
 ## Tests
 
 ```bash
-pytest              # 68 tests, no network, no API key needed
+pytest              # 88 tests, no network, no API key needed
 pytest -m live      # 7 more: real arXiv calls + real Docker containers
 ```
 
@@ -60,7 +60,7 @@ and never depends on a network connection.
 | 5 | Critic agent | done |
 | 6 | Coding agent + Docker sandbox | done |
 | 7 | Experiment tracking + evaluation engine | done |
-| 8 | Hypothesis generation from results | not started |
+| 8 | Hypothesis generation from results (closed loop) | done |
 | 9 | Knowledge graph | not started |
 | 10 | Multi-agent orchestration, benchmarking, self-improvement | not started |
 
@@ -72,13 +72,15 @@ and never depends on a network connection.
   allow. `ClaudeProvider`'s default model string may also be stale.
 - A local 7B model is much weaker than a frontier model. It produces usable
   summaries and hypotheses, but expect vaguer reasoning.
-- The research loop and the experiment runner are still separate entry
-  points. Nothing yet turns a generated hypothesis into an experiment
-  automatically — that is Milestone 8.
-- Nothing checks whether a result is *meaningful*. A live run produced a
-  timing bug that reported 8463 seconds for a 13-second loop: the code
-  ran, the metric parsed, the number was nonsense. Catching that needs a
-  critic on results, not just on hypotheses.
+- The result critic reviews each experiment in isolation. Across a live
+  3-cycle run it passed all three, and did not notice that the binary
+  search timings contradict each other: 0.00068s at 50k elements,
+  0.00136s at 200k, then 0.00055s at 400k. Binary search does not get
+  faster on a bigger list — those numbers are measurement noise. Spotting
+  that needs experiment history, which is Milestone 9.
+- The literature loop (research/loop.py) and the experiment loop
+  (research/cycle.py) are still separate entry points. A hypothesis from
+  a paper search does not yet flow into an experiment.
 - The critic reviews hypotheses only. The experiment-stage checklist (data
   leakage, sample size, statistical significance, baseline choice) is
   defined in `agents/critic.py` but deliberately unused until Milestone 7,
@@ -141,16 +143,34 @@ because one run is not evidence. Experiments store their seed, the exact
 code that ran, stdout, and any error — failed runs included, since a
 failure that leaves no trace teaches nothing.
 
+## The research cycle
+
+`research/cycle.py` runs a chain where each hypothesis comes from the
+previous result rather than from a person. One cycle is: hypothesis ->
+generated code -> sandboxed run -> metrics -> baseline comparison ->
+result review -> ranked follow-up proposals. The best-ranked proposal
+becomes the next cycle.
+
+A live 3-cycle run went from 50,000 to 200,000 to 400,000 elements,
+each step chosen by the system.
+
+Two gates can end a chain early: an experiment that measures nothing,
+and a result the critic marks `invalid`. A `suspicious` verdict is
+recorded as a warning but does not stop the run — an earlier version
+treated every doubt as fatal and the loop never reached a second cycle.
+
+`max_cycles` is required. Nothing here decides on its own to keep going.
+
 ## Project layout
 
 ```
-agents/           critic.py (Milestone 5), coder.py (Milestone 6)
-research/         loop.py — the research loop orchestration
+agents/           critic.py, coder.py, result_critic.py, hypothesis.py
+research/         loop.py (literature), cycle.py (the closed loop)
 literature/       arxiv_search.py — literature backend
 tools/            llm_provider.py — LLM abstraction (Claude + Ollama)
 database/         models.py, db.py — SQLAlchemy schema + engine
 migrations/       Alembic migration history
-tests/            conftest.py (FakeLLM) + 75 tests
+tests/            conftest.py (FakeLLM) + 95 tests
 scripts/          run_research.py — thin CLI entrypoint
 docs/             phase0-architecture.md
 memory/           (empty — reserved for the knowledge graph, Milestone 9)
