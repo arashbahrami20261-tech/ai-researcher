@@ -45,7 +45,7 @@ python scripts/run_research.py --provider ollama "How do transformers handle lon
 ## Tests
 
 ```bash
-pytest              # 112 tests, no network, no API key needed
+pytest              # 127 tests, no network, no API key needed
 pytest -m live      # 7 more: real arXiv calls + real Docker containers
 ```
 
@@ -66,7 +66,7 @@ and never depends on a network connection.
 | 7 | Experiment tracking + evaluation engine | done |
 | 8 | Hypothesis generation from results (closed loop) | done |
 | 9 | Knowledge graph + trend checks | done |
-| 10 | Multi-agent orchestration, benchmarking, self-improvement | not started |
+| 10 | Benchmarking + controlled self-improvement | done |
 
 ## Known limitations
 
@@ -185,6 +185,42 @@ where they live: metric names drifted between cycles until they were
 enforced in code, and the tolerance was set to 0.5 without looking at
 data, which made it miss a real 46.8% drop by three percentage points.
 
+## Benchmarks and self-improvement
+
+`benchmarks/` scores the system against fixed tasks with known answers,
+so "it got better" is a number rather than an opinion. Half the bug and
+trend cases are clean on purpose: a critic that flags everything catches
+every bug, and looks perfect unless false alarms are counted too.
+
+Current baseline, bug detection: **83.3% over 3 runs, sd 0.0, zero false
+alarms.** It catches both magnitude anomalies. It misses the one bug
+visible only in the code — accuracy scored against training labels
+instead of the test set — because the number itself looks plausible.
+
+`improve.py` proposes a prompt change, re-runs the benchmark, and accepts
+only on a gain above 5%. The first real run was **rejected**: the model
+proposed adding "ensure the correct metric is being measured", which
+restates what the prompt already said. The benchmark went 83.3% to
+83.3%. Without the loop that change would have been applied, because it
+reads as sensible.
+
+The finding is that some weaknesses are not prompt-shaped. Detecting
+data leakage needs conceptual understanding, not a stronger reminder.
+
+Self-improvement can only alter a prompt string. It cannot edit logic,
+add dependencies, or touch the sandbox.
+
+## Multi-agent orchestration: deliberately not built
+
+The roadmap listed a Research Director coordinating specialised agents.
+`research/cycle.py` already does that coordination, in deterministic
+code that can be tested. Adding a model to decide which agent runs next
+would make the system less predictable without making it more capable —
+and the spec says to add specialised agents only where they improve
+reliability.
+
+Recorded as a decision, not as unfinished work.
+
 ## Project layout
 
 ```
@@ -194,7 +230,7 @@ literature/       arxiv_search.py — literature backend
 tools/            llm_provider.py — LLM abstraction (Claude + Ollama)
 database/         models.py, db.py — SQLAlchemy schema + engine
 migrations/       Alembic migration history
-tests/            conftest.py (FakeLLM) + 119 tests
+tests/            conftest.py (FakeLLM) + 134 tests
 scripts/          run_research.py — thin CLI entrypoint
 docs/             phase0-architecture.md
 knowledge_graph/  store.py — edges between experiments and hypotheses
@@ -202,5 +238,6 @@ experiments/      runner.py — runs and records one experiment
 evaluation/       compare.py (baselines), trends.py (chain consistency)
 security/         sandbox.py — Docker isolation for generated code
 models/           (empty — Pydantic schemas, added as needed)
+benchmarks/       tasks.py, runner.py, improve.py
 configs/          (empty)
 ```
