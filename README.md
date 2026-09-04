@@ -11,7 +11,10 @@ separate literature path handles arXiv search and paper summaries.
 Verified end-to-end against a local model: a 3-cycle run scaled from
 50,000 to 200,000 elements, each step chosen by the system.
 
-See `docs/phase0-architecture.md` for the full architecture and roadmap.
+See `docs/phase0-architecture.md` for the full architecture and roadmap,
+and [`docs/what-i-learned.md`](docs/what-i-learned.md) for what building
+it actually taught me — mostly through bugs that a green test suite did
+not catch.
 
 ## Setup
 
