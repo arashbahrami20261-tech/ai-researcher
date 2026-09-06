@@ -195,8 +195,30 @@ so "it got better" is a number rather than an opinion. Half the bug and
 trend cases are clean on purpose: a critic that flags everything catches
 every bug, and looks perfect unless false alarms are counted too.
 
-Current baseline, bug detection: **83.3% over 3 runs, sd 0.0, zero false
-alarms.** It catches both magnitude anomalies. It misses the one bug
+Current baselines, each over 3 runs:
+
+| Suite | Score | Spread |
+|---|---|---|
+| Coding | 87.5% | 0.0 |
+| Bug detection | 83.3% | 0.0 |
+| Trends | 100% | n/a (no model) |
+
+Coding fails one task out of eight, consistently: `sort_stability`, which
+asks the model to sort a list and report the third element (1-indexed).
+Every run produced `METRIC = 3` as a variable assignment rather than a
+printed `METRIC third=3` line — the model read METRIC as an identifier,
+not an output prefix. The other seven tasks use the same format and pass,
+so the format is not the problem; the multi-part instruction is.
+
+That task has deliberately not been simplified. Rewording it until the
+model passes would make the benchmark easier, not the system better.
+
+The first coding run scored 75% and was recorded as such until it was
+re-run three times. `string_reversal` failed once and passed three times
+out of three afterwards. One run is not evidence — a rule this project
+enforces on its own experiments, and one I broke while measuring it.
+
+Bug detection: It catches both magnitude anomalies. It misses the one bug
 visible only in the code — accuracy scored against training labels
 instead of the test set — because the number itself looks plausible.
 
@@ -212,6 +234,24 @@ data leakage needs conceptual understanding, not a stronger reminder.
 
 Self-improvement can only alter a prompt string. It cannot edit logic,
 add dependencies, or touch the sandbox.
+
+## Known limitation: benchmark contamination
+
+The benchmark tasks are fixed and public in this repository. That is
+fine today, because everything is scored against a local model whose
+training data predates them. It stops being fine the moment this repo is
+large enough to appear in a training set: a model that has seen
+`sum_1_to_100` and its expected answer would score on memory rather than
+capability, and the number would look the same either way.
+
+LiveBench (arXiv:2406.19314) handles this by replacing roughly one sixth
+of its questions per update, so the whole benchmark turns over about
+every six months, and by withholding each month's new questions for a
+month so part of the set is always private.
+
+Nothing here does that yet. Every score in this README should be read as
+a measurement against an uncontaminated model, and would need
+re-establishing on any model that might have seen this repository.
 
 ## Multi-agent orchestration: deliberately not built
 
